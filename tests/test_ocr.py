@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
 import ocr
@@ -11,12 +13,16 @@ from PIL import Image
 class OCRTests(unittest.TestCase):
     def test_windows_ocr_uses_bundled_executable_and_model_without_path(self):
         tsv = 'level\tleft\ttop\twidth\theight\tconf\ttext\n5\t10\t20\t30\t10\t95\tštítek\n'
-        with patch.object(ocr.sys, 'platform', 'win32'), patch.object(ocr.Path, 'is_file', return_value=True), patch.object(ocr.shutil, 'which', return_value=None), patch.object(ocr.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=tsv)) as run:
-            text, confidence = ocr.tesseract_read('label.png', 6)
-            self.assertEqual((text, confidence), ('štítek', 95))
-            self.assertEqual(run.call_args.args[0][0], str(ocr.ROOT / 'native' / 'tesseract' / 'tesseract.exe'))
-            self.assertEqual(run.call_args.kwargs['env']['TESSDATA_PREFIX'], str(ocr.ROOT / 'native' / 'tesseract' / 'tessdata'))
-            self.assertEqual(run.call_args.kwargs['encoding'], 'utf-8')
+        with tempfile.TemporaryDirectory() as folder:
+            image = Path(folder) / 'český štítek.png'
+            image.write_bytes(b'example image bytes')
+            with patch.object(ocr.sys, 'platform', 'win32'), patch.object(ocr.Path, 'is_file', return_value=True), patch.object(ocr.shutil, 'which', return_value=None), patch.object(ocr.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=tsv.encode('utf-8'))) as run:
+                text, confidence = ocr.tesseract_read(image, 6)
+                self.assertEqual((text, confidence), ('štítek', 95))
+                self.assertEqual(run.call_args.args[0][:2], [str(ocr.ROOT / 'native' / 'tesseract' / 'tesseract.exe'), 'stdin'])
+                self.assertEqual(run.call_args.kwargs['input'], image.read_bytes())
+                self.assertEqual(run.call_args.kwargs['env']['TESSDATA_PREFIX'], 'tessdata')
+                self.assertEqual(run.call_args.kwargs['cwd'], ocr.ROOT / 'native' / 'tesseract')
 
     def test_mac_ignores_windows_executable_and_uses_installed_tesseract(self):
         with patch.object(ocr.sys, 'platform', 'darwin'), patch.object(ocr.Path, 'is_file', return_value=True), patch.object(ocr.shutil, 'which', return_value='/opt/homebrew/bin/tesseract'):

@@ -81,15 +81,22 @@ def tesseract_read(path, psm):
     if not binary:
         raise ValueError('Chybí lokální OCR Tesseract. Rozbalte celý přenosný balíček nebo nainstalujte Tesseract.')
     environment = {**os.environ, 'OMP_THREAD_LIMIT': '2'}
+    working_directory = None
     if Path(binary).parent == ROOT / 'native' / 'tesseract':
-        environment['TESSDATA_PREFIX'] = str(Path(binary).parent / 'tessdata')
-    result = subprocess.run([binary, str(path), 'stdout', '-l', 'eng', '--psm', str(psm), 'tsv'],
-                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60,
-                            env=environment, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        # MinGW Tesseract cannot reliably open Unicode paths. CreateProcessW
+        # sets the Unicode working directory; Tesseract sees only relative ASCII
+        # model paths and receives image bytes through stdin.
+        working_directory = Path(binary).parent
+        environment['TESSDATA_PREFIX'] = 'tessdata'
+    result = subprocess.run([binary, 'stdin', 'stdout', '-l', 'eng', '--psm', str(psm), 'tsv'],
+                            input=Path(path).read_bytes(), capture_output=True, timeout=60,
+                            cwd=working_directory, env=environment,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     if result.returncode:
-        raise ValueError('Tesseract nemohlo obrázek přečíst. Ověřte instalaci a jazyk eng. ' + result.stderr[-600:])
+        details = result.stderr.decode('utf-8', errors='replace')[-600:]
+        raise ValueError(f'Tesseract nemohlo obrázek přečíst (kód {result.returncode}). Ověřte instalaci a jazyk eng. ' + details)
     spans = []
-    for word in csv.DictReader(io.StringIO(result.stdout), delimiter='\t', quoting=csv.QUOTE_NONE):
+    for word in csv.DictReader(io.StringIO(result.stdout.decode('utf-8', errors='replace')), delimiter='\t', quoting=csv.QUOTE_NONE):
         content = word.get('text', '').strip()
         if content and word.get('level') == '5':
             spans.append({'text': content, 'confidence': float(word['conf']),
