@@ -24,7 +24,8 @@ def main():
             with ZipFile(archive) as zipped:
                 zipped.extractall(folder)
             package = Path(folder) / 'Stitkovnik-Windows-x64'
-            command = [str(package / 'runtime' / 'python.exe'), '-B', '-X', 'utf8', str(package / 'app.py')]
+            command = [os.environ.get('COMSPEC', r'C:\Windows\System32\cmd.exe'),
+                       '/d', '/c', str(package / 'Spustit.bat')]
         else:
             subprocess.run(['/usr/bin/ditto', '-x', '-k', str(archive), folder], check=True)
             package = next(Path(folder).glob('Stitkovnik-macOS-*'))
@@ -87,7 +88,9 @@ def main():
             print('OK: ZIP běží mimo projekt, z cesty s mezerami a diakritikou, bez Pythonu / swiftc / Tesseractu v PATH.')
         finally:
             if windows:
-                process.terminate()
+                if process.poll() is None:
+                    taskkill = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'taskkill.exe'
+                    subprocess.run([str(taskkill), '/pid', str(process.pid), '/t', '/f'], capture_output=True, timeout=10)
             else:
                 process.send_signal(signal.SIGINT)
             try:
