@@ -167,8 +167,6 @@ aplikace, nikoli do tohoto balíčku. Při přenosu ZIPu se výsledky nepřená�
 Před ukončením práce exportujte Excel nebo CSV. Fotografie se neuchovávají.
 Adresa aplikace je uvedená v příkazovém okně; výchozí port je 8765.
 
-Balíček byl sestaven na Macu z Windows distribucí Pythonu a knihoven.
-Ověření přímo na Windows je potřeba provést před širším nasazením.
 Podrobný návod je v NAVOD.md. Sdílejte celý ZIP včetně runtime a native.
 ''', encoding='utf-8-sig')
         shutil.copyfile(ROOT / 'README.md', package / 'NAVOD.md')

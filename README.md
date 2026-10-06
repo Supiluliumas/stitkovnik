@@ -59,7 +59,7 @@ Balíček obsahuje [oficiální vestavěný Python](https://docs.python.org/3.13
 
 Microsoft Visual C++ runtime potřebný pro ZXing je přibalený přímo ve složce `runtime`; samostatná instalace redistributable není potřeba. DLL pocházejí z [oficiální distribuce Microsoftu](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) a používají [lokální nasazení](https://learn.microsoft.com/en-us/cpp/windows/deployment-in-visual-cpp).
 
-ZIP obsahuje aplikaci, licence, zdroje závislostí a umělé štítky. Sdílejte jej celý. Vlastní fotografie a pracovní exporty v něm nejsou; tabulka a pravidla zůstávají v prohlížeči konkrétního počítače. Přímé ověření na Windows 10/11 je potřeba provést před širším nasazením.
+ZIP obsahuje aplikaci, licence, zdroje závislostí a umělé štítky. Sdílejte jej celý. Vlastní fotografie a pracovní exporty v něm nejsou; tabulka a pravidla zůstávají v prohlížeči konkrétního počítače. Výsledky ověření konkrétního vydání najdete na stránce Releases.
 
 Sestavení je možné i na Macu nebo Linuxu. Vyžaduje Python 3.11+ s pip, internet a [7-Zip](https://www.7-zip.org/download.html) dostupný jako `7zz`/`7z` (nebo předaný přes `--sevenzip`). Příjemce ZIPu tyto nástroje nepotřebuje:
 
@@ -75,7 +75,7 @@ Ověření ve Windows (ve zdrojovém projektu; lze použít Python z rozbalenéh
 rozbaleny-balicek\runtime\python.exe -X utf8 tools\check_portable.py dist\Stitkovnik-Windows-x64.zip
 ```
 
-Test rozbalí ZIP do dočasné cesty s mezerami a diakritikou, použije jen přibalený Python a OCR, přečte oba ukázkové štítky a ověří XLSX/CSV. Na Macu prošlo 28 jednotkových testů a kontrola struktury Windows ZIPu a jeho SHA-256. Pokus o běh přes Wine v Dockeru na Apple Silicon selhal na interní chybě emulace paměti (`alloc_pages_vprot`), takže nedává výsledek o funkčnosti aplikace na skutečných Windows.
+Test rozbalí ZIP do dočasné cesty s mezerami a diakritikou, použije jen přibalený Python a OCR, přečte oba ukázkové štítky a ověří XLSX/CSV. Workflow [Verify portable packages](https://github.com/Supiluliumas/stitkovnik/actions/workflows/portable.yml) sestavuje a ověřuje balíčky na Windows a macOS Apple Silicon; každý běh zahrnuje také jednotkové testy. Konzole při sestavení ve Windows má používat UTF-8 (`python -X utf8` nebo `PYTHONUTF8=1`).
 
 ## Spuštění ze zdrojového kódu na macOS
 
