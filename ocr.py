@@ -87,7 +87,7 @@ def tesseract_read(path, psm):
                             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60,
                             env=environment, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     if result.returncode:
-        raise ValueError('Tesseract nemohlo obrázek přečíst. Ověřte instalaci a jazyk eng.')
+        raise ValueError('Tesseract nemohlo obrázek přečíst. Ověřte instalaci a jazyk eng. ' + result.stderr[-600:])
     spans = []
     for word in csv.DictReader(io.StringIO(result.stdout), delimiter='\t', quoting=csv.QUOTE_NONE):
         content = word.get('text', '').strip()
