@@ -1,12 +1,14 @@
 import unittest
+import io
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
 import ocr
+import app
 from app import barcode_serial, label_crop
-from extractor import extract
-from ocr import reconstruct
+from extractor import DEFAULT_RULES, extract
+from ocr import reconstruct, text_skew
 from PIL import Image
 
 
@@ -23,6 +25,52 @@ class OCRTests(unittest.TestCase):
                 self.assertEqual(run.call_args.kwargs['input'], image.read_bytes())
                 self.assertEqual(run.call_args.kwargs['env']['TESSDATA_PREFIX'], 'tessdata')
                 self.assertEqual(run.call_args.kwargs['cwd'], ocr.ROOT / 'native' / 'tesseract')
+                self.assertIn('load_system_dawg=0', run.call_args.args[0])
+                self.assertIn('load_freq_dawg=0', run.call_args.args[0])
+
+    def test_tesseract_spans_use_image_dimensions_for_crop_coordinates(self):
+        tsv = 'level\tleft\ttop\twidth\theight\tconf\ttext\n5\t100\t50\t200\t20\t95\tS/N:\n'
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'label.png'
+            Image.new('RGB', (1000, 500)).save(path)
+            with patch.object(ocr, 'tesseract_binary', return_value='tesseract'), patch.object(ocr.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=tsv.encode())):
+                text, confidence, spans = ocr.tesseract_read(path, 11, include_spans=True)
+            self.assertEqual((text, confidence), ('S/N:', 95))
+            self.assertEqual([spans[0][key] for key in ('left', 'top', 'width', 'height')], [.1, .1, .2, .04])
+
+    def test_skew_uses_multiple_lines_and_preserves_rotation_direction(self):
+        spans = [{'text': 'word', 'confidence': 90, 'line': (1, 1, line),
+                  'left': x, 'top': line * 60 - x * .07, 'width': 40, 'height': 20}
+                 for line in (1, 2) for x in (0, 100, 200)]
+        self.assertAlmostEqual(text_skew(spans), -4, delta=.1)
+        self.assertEqual(text_skew(spans[:3]), 0)
+        for span in spans:
+            span['top'] = span['line'][2] * 60
+        self.assertEqual(text_skew(spans), 0)
+
+    def test_windows_pipeline_recovers_small_label_with_a_crop(self):
+        data = io.BytesIO()
+        Image.new('RGB', (3000, 2000), 'white').save(data, format='PNG')
+        spans = [{'text': 'S/N:', 'left': .4, 'top': .45, 'width': .1, 'height': .01},
+                 {'text': 'MAC:', 'left': .4, 'top': .48, 'width': .1, 'height': .01}]
+        sizes = []
+
+        def read(path, psm, include_spans=False):
+            with Image.open(path) as image:
+                sizes.append(image.size)
+            if include_spans:
+                return 'S/N:\nMAC:', 50, spans
+            return 'S/N: 000123456789\nMAC: A4:14:37:00:12:AB', 95
+
+        with patch.object(app, 'vision_supported', return_value=False), patch.object(app, 'tesseract_binary', return_value='tesseract'), patch.object(app, 'tesseract_read', side_effect=read), patch.object(app.zxingcpp, 'read_barcodes', return_value=[]):
+            result = app.ocr_image(data.getvalue(), DEFAULT_RULES, rotate=False)
+        self.assertEqual(result['fields']['S/N'], '000123456789')
+        self.assertEqual(result['fields']['MAC'], 'A4:14:37:00:12:AB')
+        self.assertIn('výřez štítku', result['engine'])
+        self.assertEqual(len(sizes), 2)
+        self.assertLess(sizes[1][0], sizes[0][0])
+        self.assertGreater(sizes[1][0], 1000)
+        self.assertEqual(result['originalText'], 'S/N:\nMAC:')
 
     def test_mac_ignores_windows_executable_and_uses_installed_tesseract(self):
         with patch.object(ocr.sys, 'platform', 'darwin'), patch.object(ocr.Path, 'is_file', return_value=True), patch.object(ocr.shutil, 'which', return_value='/opt/homebrew/bin/tesseract'):

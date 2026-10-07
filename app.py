@@ -145,9 +145,33 @@ def ocr_image(data, rules, rotate=True):
                 prepared = prepared.resize((prepared.width * 2, prepared.height * 2), Image.Resampling.LANCZOS)
             for angle, psm in [(0, 6), (0, 11)] + ([(90, 6), (180, 6), (270, 6)] if rotate else []):
                 try:
-                    prepared.rotate(angle, expand=True, fillcolor=255).save(path)
-                    text, confidence = tesseract_read(path, psm)
+                    oriented = prepared.rotate(angle, expand=True, fillcolor=255)
+                    oriented.save(path)
+                    text, confidence, spans = tesseract_read(path, psm, include_spans=True)
                     add(text, confidence, f'Tesseract · režim {psm}', angle, 10)
+                    if not complete():
+                        focused = label_crop(oriented, spans)
+                        if focused is not None:
+                            # Enlarge the label independently of the full photo;
+                            # a small label in a large photo previously stayed tiny.
+                            scale = min(3, 6000 / max(focused.size))
+                            if scale > 1:
+                                focused = focused.resize((round(focused.width * scale), round(focused.height * scale)), Image.Resampling.LANCZOS)
+                            focused = ImageOps.expand(focused, border=12, fill=255)
+                            codes.extend({'payload': c.text, 'symbology': str(c.format)} for c in zxingcpp.read_barcodes(focused))
+                            skew = spans[0].get('skew', 0) if spans else 0
+                            variants = [(focused, 'výřez štítku')]
+                            if skew:
+                                variants.insert(0, (focused.rotate(skew, expand=True, fillcolor=255), 'narovnaný výřez štítku'))
+                            for variant, description in variants:
+                                variant.save(path)
+                                for crop_psm in (6, 11):
+                                    text, confidence = tesseract_read(path, crop_psm)
+                                    add(text, confidence, f'Tesseract · {description} · režim {crop_psm}', angle, 10)
+                                    if complete():
+                                        break
+                                if complete():
+                                    break
                     if complete():
                         break
                 except (ValueError, OSError, subprocess.TimeoutExpired) as error:

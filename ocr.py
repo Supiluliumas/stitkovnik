@@ -2,12 +2,16 @@
 import csv
 import io
 import json
+import math
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import statistics
 import threading
+
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parent
 BUILD_LOCK = threading.Lock()
@@ -59,6 +63,31 @@ def reconstruct(spans):
     return text, confidence
 
 
+def text_skew(spans):
+    """Estimate a small tilt from multiple Tesseract text lines, in pixels."""
+    lines = {}
+    for span in spans:
+        if span['confidence'] >= 50:
+            lines.setdefault(span['line'], []).append(span)
+    angles = []
+    for line in lines.values():
+        if len(line) < 3:
+            continue
+        xs = [s['left'] + s['width'] / 2 for s in line]
+        ys = [s['top'] + s['height'] / 2 for s in line]
+        height = statistics.median(s['height'] for s in line)
+        if max(xs) - min(xs) < height * 5:
+            continue
+        mx, my = statistics.mean(xs), statistics.mean(ys)
+        slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
+        if max(abs(y - my - slope * (x - mx)) for x, y in zip(xs, ys)) <= height * .5:
+            angles.append(math.degrees(math.atan(slope)))
+    if len(angles) < 2:
+        return 0
+    angle = statistics.median(angles)
+    return angle if .75 <= abs(angle) <= 12 else 0
+
+
 def vision_read(path, include_spans=False):
     result = subprocess.run([str(vision_binary()), str(path)], capture_output=True, text=True, timeout=60)
     if result.returncode:
@@ -76,7 +105,7 @@ def tesseract_binary():
     return shutil.which('tesseract')
 
 
-def tesseract_read(path, psm):
+def tesseract_read(path, psm, include_spans=False):
     binary = tesseract_binary()
     if not binary:
         raise ValueError('Chybí lokální OCR Tesseract. Rozbalte celý přenosný balíček nebo nainstalujte Tesseract.')
@@ -88,7 +117,8 @@ def tesseract_read(path, psm):
         # model paths and receives image bytes through stdin.
         working_directory = Path(binary).parent
         environment['TESSDATA_PREFIX'] = 'tessdata'
-    result = subprocess.run([binary, 'stdin', 'stdout', '-l', 'eng', '--psm', str(psm), 'tsv'],
+    result = subprocess.run([binary, 'stdin', 'stdout', '-l', 'eng', '--psm', str(psm),
+                             '-c', 'load_system_dawg=0', '-c', 'load_freq_dawg=0', 'tsv'],
                             input=Path(path).read_bytes(), capture_output=True, timeout=60,
                             cwd=working_directory, env=environment,
                             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -100,5 +130,19 @@ def tesseract_read(path, psm):
         content = word.get('text', '').strip()
         if content and word.get('level') == '5':
             spans.append({'text': content, 'confidence': float(word['conf']),
+                          'line': tuple(word.get(k, '') for k in ('block_num', 'par_num', 'line_num')),
                           **{k: float(word[k]) for k in ('left', 'top', 'width', 'height')}})
-    return reconstruct(spans)
+    text, confidence = reconstruct(spans)
+    if include_spans:
+        # Share Vision's top-left, normalized coordinate convention so crops
+        # also work after resizing and rotation on non-Apple systems.
+        with Image.open(path) as image:
+            normalized = [{**s, 'left': s['left'] / image.width,
+                           'top': s['top'] / image.height,
+                           'width': s['width'] / image.width,
+                           'height': s['height'] / image.height} for s in spans]
+        angle = text_skew(spans)
+        for span in normalized:
+            span['skew'] = angle
+        return text, confidence, normalized
+    return text, confidence
